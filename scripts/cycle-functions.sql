@@ -10,12 +10,13 @@ CREATE TEMPORARY TABLE edge (
    id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
    source INT NOT NULL,
    target INT NOT NULL,
-   visited BOOLEAN DEFAULT FALSE
+   visited BOOLEAN DEFAULT FALSE,
+   CHECK (source <> target)
 );
 
-DROP FUNCTION IF EXISTS isEquivalentConflict;
+DROP FUNCTION IF EXISTS testeEquivalenciaPorConflito;
 DELIMITER //
-CREATE FUNCTION isEquivalentConflict() RETURNS BOOLEAN
+CREATE FUNCTION testeEquivalenciaPorConflito() RETURNS INT
 BEGIN
    DECLARE done BOOLEAN DEFAULT FALSE;
 
@@ -29,83 +30,89 @@ BEGIN
    DECLARE opB CHAR(1);
    DECLARE attrB VARCHAR(10);
 
-   DECLARE edgeId INT;
-   DECLARE target INT;
-   DECLARE source INT;
-   DECLARE visited BOOLEAN;
+   DECLARE edge_id INT;
+   DECLARE edge_target INT;
+   DECLARE edge_source INT;
+   DECLARE edge_visited BOOLEAN;
 
-   DECLARE has_cycle BOOLEAN DEFAULT FALSE;
+   DECLARE has_cycle INT DEFAULT 0;
   
    -- select all the rows from the Schedule table and store them in some temporary table
    -- iterate over the rows in the temporary table and perform the operations
-   DECLARE tmp CURSOR FOR SELECT * FROM Schedule ORDER BY time;
-   DECLARE edgetmp CURSOR FOR SELECT * FROM edge;
+   DECLARE schedule_cursor CURSOR FOR SELECT * FROM Schedule ORDER BY `time`;
+   DECLARE edge_cursor CURSOR FOR SELECT * FROM edge ORDER BY id;
    DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
 
-   OPEN tmp;
-
-   -- SELECT THE FIRST ROW
-   FETCH tmp INTO timeA, idA, opA, attrA;
-
+   OPEN schedule_cursor;
    read_loop: LOOP
       IF done THEN
          LEAVE read_loop;
       END IF;
-      -- Makes it quadratic on reads
-      FETCH tmp INTO timeB, idB, opB, attrB;
 
-      -- if both operations are reads 'R'
-      -- if it is the same transaction OR
-      -- if it is different attributes
-      -- Skip the loop
-      IF (opA = "R" AND opB = "R") OR
-         (idA = idB) OR
-         (attrA != attrB) THEN
-         ITERATE read_loop;
+      FETCH schedule_cursor INTO timeA, idA, opA, attrA;
+
+      -- Case 1 & 3 (mixed): 
+      IF opA = 'W' OR opA = 'R' THEN
+         -- Select the first `W` op from a different schedule
+         SELECT `#t` INTO edge_source FROM Schedule 
+            WHERE `#t` <> idA AND `op` = 'W' AND `time` > timeA
+            ORDER BY `time`;
+         IF edge_source IS NOT NULL THEN
+            INSERT INTO edge (`source`, `target`) VALUES (edge_source, idA);
+         END IF;
       END IF;
-
-      -- checking if the transaction is conflicting
-      -- rules: (R, W), (W, R), (W, W)
-      IF (opA = "W" AND opB = "W") OR 
-         (opA = "W" AND opB = "R") OR 
-         (opA = "R" AND opB = "W") THEN
-         INSERT INTO edge (source, target) VALUES (idA, idB);
+      -- Case 2
+      IF opA = 'W' THEN
+         SELECT `#t` INTO edge_source FROM Schedule 
+            WHERE `#t` <> idA AND `op` = 'R' AND `time` > timeA
+            ORDER BY `time`;
+          IF edge_source IS NOT NULL THEN
+            INSERT INTO edge (`source`, `target`) VALUES (edge_source, idA);
+         END IF;
       END IF;
-
-      -- making A = B
-      SET timeA = timeB;
-      SET idA = idB;
-      SET opA = opB;
-      SET attrA = attrB;
    END LOOP;
-   CLOSE tmp;
+   CLOSE schedule_cursor;
 
-   OPEN edgetmp;
+   OPEN edge_cursor;
    SET done = FALSE;
+   FETCH edge_cursor INTO edge_id, edge_source, edge_target, edge_visited;
    -- Checks for cycles
    check_cycles: LOOP
       IF done THEN
          LEAVE check_cycles;
       END IF;
-      FETCH edgetmp INTO edgeId, source, target, visited;
 
-      IF NOT visited THEN
-         UPDATE edge SET visited = TRUE WHERE id = edgeId;
-      ELSE 
-         SET has_cycle = TRUE;
+      -- Follow the edge until leaf or cycle is found
+      IF edge_visited THEN
+         -- There is a cycle
+         SET has_cycle = 1;
          LEAVE check_cycles;
+      ELSE
+         -- Set visited
+         UPDATE edge SET `visited` = TRUE WHERE id = edge_id;
+      END IF;
+
+      -- Step to target
+      SELECT `id`, `source`, `target`, `visited`
+      INTO edge_id, edge_source, edge_target, edge_visited
+      FROM edge
+      WHERE `id` = edge_target;
+
+      IF edge_id IS NULL THEN
+         SET done = TRUE;
       END IF;
    END LOOP;
-   CLOSE edgetmp;
+   CLOSE edge_cursor;
 
-   RETURN has_cycle;
+   RETURN 1 - has_cycle;
 END; //
 -- Reset delimiter
 DELIMITER ;
 
 -- Testing
-TRUNCATE TABLE Schedule;
 
+TRUNCATE TABLE Schedule;
+TRUNCATE TABLE edge;
 -- example_01 from spec (MySQL 5.7)
 INSERT INTO `Schedule` (`time`, `#t`, `op`, `attr`) VALUES
    (1, 1,  'R',  'X'),
@@ -116,9 +123,10 @@ INSERT INTO `Schedule` (`time`, `#t`, `op`, `attr`) VALUES
    (6, 1,  'C',  '-');
 SELECT * FROM `Schedule`;
 -- resp should be 0
-SELECT isEquivalentConflict() AS resp;
+SELECT testeEquivalenciaPorConflito() AS `Output`;
 
 TRUNCATE TABLE Schedule;
+TRUNCATE TABLE edge;
 -- example_02 from spec (MySQL 5.7)
 INSERT INTO `Schedule` (`time`, `#t`, `op`, `attr`) VALUES
    (7,   3,  'R',  'X'),
@@ -129,4 +137,90 @@ INSERT INTO `Schedule` (`time`, `#t`, `op`, `attr`) VALUES
    (12,  3,  'C',  '-');
 SELECT * FROM `Schedule`;
 -- resp should be 1
-SELECT isEquivalentConflict() AS resp;
+SELECT testeEquivalenciaPorConflito() AS `Output`;
+
+TRUNCATE TABLE Schedule;
+TRUNCATE TABLE edge;
+-- Made up simple example
+INSERT INTO `Schedule` (`time`, `#t`, `op`, `attr`) VALUES
+   (1,   1,  'R',  'X'),
+   (2,   2,  'W',  'X'),
+   (3,   1,  'R',  'X');
+SELECT * FROM `Schedule`;
+-- resp should be 1
+SELECT testeEquivalenciaPorConflito() AS `Output`;
+
+TRUNCATE TABLE Schedule;
+TRUNCATE TABLE edge;
+-- Made up simple example
+INSERT INTO `Schedule` (`time`, `#t`, `op`, `attr`) VALUES
+   (1,   1,  'R',  'X'),
+   (2,   2,  'R',  'X'),
+   (3,   2,  'C',  '-'),
+   (4,   1,  'W',  'X'),
+   (5,   1,  'C',  '-');
+SELECT * FROM `Schedule`;
+-- resp should be 0
+SELECT testeEquivalenciaPorConflito() AS `Output`;
+
+TRUNCATE TABLE Schedule;
+TRUNCATE TABLE edge;
+-- Made up simple example
+INSERT INTO `Schedule` (`time`, `#t`, `op`, `attr`) VALUES
+   (1,   1,  'R',  'X'),
+   (2,   1,  'C',  '-'),
+   (3,   2,  'W',  'X'),
+   (4,   2,  'R',  'X'),
+   (5,   2,  'C',  '-');
+SELECT * FROM `Schedule`;
+-- resp should be 0
+SELECT testeEquivalenciaPorConflito() AS `Output`;
+
+TRUNCATE TABLE Schedule;
+TRUNCATE TABLE edge;
+-- Made up simple example
+INSERT INTO `Schedule` (`time`, `#t`, `op`, `attr`) VALUES
+   (1,   1,  'W',  'X'),
+   (2,   2,  'W',  'X'),
+   (3,   2,  'C',  '-'),
+   (4,   1,  'C',  '-');
+SELECT * FROM `Schedule`;
+-- resp should be 0
+SELECT testeEquivalenciaPorConflito() AS `Output`;
+
+TRUNCATE TABLE Schedule;
+TRUNCATE TABLE edge;
+-- Made up simple example
+INSERT INTO `Schedule` (`time`, `#t`, `op`, `attr`) VALUES
+   (1,   1,  'R',  'X'),
+   (2,   2,  'R',  'X'),
+   (3,   1,  'R',  'X'),
+   (4,   2,  'C',  '-'),
+   (5,   1,  'C',  '-');
+SELECT * FROM `Schedule`;
+-- resp should be 1
+SELECT testeEquivalenciaPorConflito() AS `Output`;
+
+TRUNCATE TABLE Schedule;
+TRUNCATE TABLE edge;
+-- Made up simple example
+INSERT INTO `Schedule` (`time`, `#t`, `op`, `attr`) VALUES
+   (1,   1,  'R',  'X'),
+   (2,   2,  'R',  'X'),
+   (4,   2,  'C',  '-'),
+   (5,   1,  'C',  '-');
+SELECT * FROM `Schedule`;
+-- resp should be 1
+SELECT testeEquivalenciaPorConflito() AS `Output`;
+
+TRUNCATE TABLE Schedule;
+TRUNCATE TABLE edge;
+-- Made up simple example, out of order
+INSERT INTO `Schedule` (`time`, `#t`, `op`, `attr`) VALUES
+   (5,   1,  'C',  '-'),
+   (1,   1,  'R',  'X'),
+   (4,   2,  'C',  '-'),
+   (2,   2,  'R',  'X');
+SELECT * FROM `Schedule`;
+-- resp should be 1
+SELECT testeEquivalenciaPorConflito() AS `Output`;
