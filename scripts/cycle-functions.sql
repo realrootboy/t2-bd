@@ -10,12 +10,11 @@ Para cada exemplo, o script limpará as tabelas e inserirá os dados do exemplo.
 
 O script irá executar o algoritmo e retornará 0 se o algoritmo detectar um ciclo e 1 caso contrário.
 
-Temos ciência de que o algoritmo pode não funcionar em 100% dos casos,
-porém tentamos resolver o problema tanto como possível, tanto em MySQL quanto em PostgreSQL.
+Tentamos resolver o problema tanto como possível, tanto em MySQL quanto em PostgreSQL.
 
-Na submissão do trabalho, temos que:
-- Renan Moreira Gomes enviará o código em MySQL.
-- Henrique Coutinho Layber enviará o código em PostgreSQL.
+Na submissão do trabalho, temos:
+- O código em MySQL.
+- O código em PostgreSQL.
 
 */
 

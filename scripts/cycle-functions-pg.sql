@@ -1,21 +1,20 @@
 /*
 
-Cycle Detection using MySQL 5.7
+Cycle Detection using Postgres 10
 Autores: Henrique Coutinho Layber e Renan Moreira Gomes
 
-Para executar o script, execute esse .sql em um banco de dados MySQL 5.7
+Para executar o script, execute esse .sql em um banco de dados Postgres 10
 
 O script criará as tabelas necessárias para o funcionamento do algoritmo.
 Para cada exemplo, o script limpará as tabelas e inserirá os dados do exemplo.
 
 O script irá executar o algoritmo e retornará 0 se o algoritmo detectar um ciclo e 1 caso contrário.
 
-Temos ciência de que o algoritmo pode não funcionar em 100% dos casos,
-porém tentamos resolver o problema tanto como possível, tanto em MySQL quanto em PostgreSQL.
+Tentamos resolver o problema tanto como possível, tanto em MySQL quanto em PostgreSQL.
 
-Na submissão do trabalho, temos que:
-- Renan Moreira Gomes enviará o código em MySQL.
-- Henrique Coutinho Layber enviará o código em PostgreSQL.
+Na submissão do trabalho, temos:
+- O código em MySQL.
+- O código em PostgreSQL.
 
 */
 
